@@ -1,0 +1,117 @@
+name: Issue Triage (Reusable)
+
+on:
+  workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check config exists
+        run: |
+          if [ ! -f .github/ai-review.yml ]; then
+            echo "::error::.github/ai-review.yml not found. See https://github.com/mnmal-ai/.github for setup instructions."
+            exit 1
+          fi
+
+      - name: Parse config
+        id: cfg
+        run: |
+          CFG=".github/ai-review.yml"
+
+          HAS_TRIAGE=$(yq 'has("issue_triage")' "$CFG")
+          if [ "$HAS_TRIAGE" != "true" ]; then
+            echo "::notice::No issue_triage section in .github/ai-review.yml — skipping issue triage."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          echo "model=$(yq '.issue_triage.model // "claude-sonnet-4-6"' "$CFG")" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "repo_context<<HEREDOC"
+            yq '.issue_triage.repo_context' "$CFG"
+            echo "HEREDOC"
+          } >> "$GITHUB_OUTPUT"
+
+          AREAS=$(yq '.issue_triage.areas // [] | join(", ")' "$CFG")
+          echo "areas=$AREAS" >> "$GITHUB_OUTPUT"
+
+      - name: Run Issue Triage
+        if: steps.cfg.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --model ${{ steps.cfg.outputs.model }}
+            --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh search issues:*),Bash(gh label list:*)"
+          show_full_output: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE NUMBER: ${{ github.event.issue.number }}
+            TITLE: ${{ github.event.issue.title }}
+            BODY: ${{ github.event.issue.body }}
+            AUTHOR: ${{ github.event.issue.user.login }}
+
+            You are triaging a new issue. Repo context:
+            ${{ steps.cfg.outputs.repo_context }}
+
+            Known module areas: ${{ steps.cfg.outputs.areas }}
+
+            ## Phase 1 — Triage
+
+            1. List available labels:
+               gh label list --repo ${{ github.repository }} --limit 100
+
+            2. Classify the issue and apply matching labels. Only apply labels that exist in the repo.
+               Consider: type (bug, enhancement, question, documentation), area (from the known areas above),
+               priority (critical, high, low).
+
+            3. Search the codebase for context. For each relevant area, search for src/<area>/, packages/<area>/,
+               or equivalent. Use Grep and Glob to find the most relevant files.
+
+            4. Post a triage comment:
+               gh issue comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --body "..."
+
+               Format:
+               ## 🤖 Auto-Triage
+
+               **Type**: bug | enhancement | question | documentation
+               **Area**: <area from known list>
+
+               ### Relevant Context
+               <key files, interfaces, or functions related to this issue>
+
+               ### Suggested Next Steps
+               <actionable guidance for whoever picks this up>
+
+            ## Phase 2 — De-duplication
+
+            1. Extract 2-3 key terms from the issue. Search for similar open issues (exclude #${{ github.event.issue.number }}):
+               gh search issues "<terms>" --repo ${{ github.repository }} --state open --limit 10
+
+            2. If potential duplicates found, update the triage comment to append:
+               gh issue comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --edit-last --body "<full comment + new section>"
+
+               ### Possible Duplicates
+               - #<number> — <title> (reason)
+               > If this is a duplicate, consider closing this issue and continuing on the original.
+
+            3. If no similar issues, do not add a duplicates section.
+
+            Rules:
+            - Only apply labels that exist in the repo.
+            - Do not close, assign, or modify the issue title/body.
+            - Only post GitHub comments — do not output text as messages.
