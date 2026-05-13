@@ -13,6 +13,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      id-token: write   # required by anthropics/claude-code-action for OIDC token; without it the action fails on every run with "Could not fetch an OIDC token"
     steps:
       - uses: actions/checkout@v4
         with:
