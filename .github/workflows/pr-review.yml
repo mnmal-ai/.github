@@ -3,8 +3,18 @@ name: PR Code Review (Reusable)
 on:
   workflow_call:
     secrets:
+      # Exactly one of these MUST be set on the caller workflow.
+      # CLAUDE_CODE_OAUTH_TOKEN takes precedence when both are present —
+      # it authenticates against the caller's Claude subscription
+      # (Pro / Max / Team) and bills per subscription rate limits rather
+      # than per-request console credit. The ANTHROPIC_API_KEY path
+      # remains for repos without a subscription token configured.
+      # Both `required: false` so callers can pass only the one they have;
+      # the conditional in the action call below picks whichever is set.
       ANTHROPIC_API_KEY:
-        required: true
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
 
 jobs:
   code-review:
@@ -59,9 +69,21 @@ jobs:
 
       - name: Run PR Review
         if: steps.cfg.outputs.skip != 'true'
+        # Auth precedence: if CLAUDE_CODE_OAUTH_TOKEN is set, pass it and
+        # blank the API key (the action prefers `anthropic_api_key` when
+        # both are present, so we explicitly clear it to force OAuth).
+        # If only ANTHROPIC_API_KEY is set, OAuth resolves to empty and
+        # the API key path is used. Caller workflows pass whatever they
+        # have configured as repo / org secrets.
+        # NOTE: known upstream issue anthropics/claude-code-action#676 —
+        # OAuth token can be cleared between prepare and execute phases
+        # on some runs. If this fires, retry-with-API-key is the
+        # fallback; both secrets staying set on the caller is
+        # intentional belt-and-braces.
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN && '' || secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: >-
             --model ${{ steps.cfg.outputs.model }}
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
