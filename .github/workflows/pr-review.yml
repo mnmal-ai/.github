@@ -75,6 +75,16 @@ jobs:
         # If only ANTHROPIC_API_KEY is set, OAuth resolves to empty and
         # the API key path is used. Caller workflows pass whatever they
         # have configured as repo / org secrets.
+        #
+        # GH Actions ternary quirk: `A && '' || B` always returns B,
+        # because the empty string is falsy and `'' || B → B`. The
+        # previous form silently passed ANTHROPIC_API_KEY alongside OAuth,
+        # and the action then picked the API key — surfacing as
+        # "Credit balance is too low" failures across every caller repo
+        # even when OAuth was configured. Putting the empty string in the
+        # OR position is the workaround: `!OAUTH && API_KEY || ''` yields
+        # '' when OAUTH is set and API_KEY when it isn't.
+        #
         # NOTE: known upstream issue anthropics/claude-code-action#676 —
         # OAuth token can be cleared between prepare and execute phases
         # on some runs. If this fires, retry-with-API-key is the
@@ -82,7 +92,7 @@ jobs:
         # intentional belt-and-braces.
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN && '' || secrets.ANTHROPIC_API_KEY }}
+          anthropic_api_key: ${{ !secrets.CLAUDE_CODE_OAUTH_TOKEN && secrets.ANTHROPIC_API_KEY || '' }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: >-
             --model ${{ steps.cfg.outputs.model }}
