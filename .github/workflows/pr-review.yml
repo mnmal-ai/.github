@@ -122,7 +122,8 @@ jobs:
           - If only Minor/Nit findings: ✅ Approved with suggestions
           - If no findings: ✅ Approved — no issues found
 
-          Always post the summary comment, and always end it with exactly one of these verdicts.
+          Always post the summary comment, and always end it with exactly one of these verdict lines,
+          copied as written above, emoji included.
           EOF
             echo "PR_REVIEW_PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
@@ -142,8 +143,10 @@ jobs:
           set -uo pipefail
           # Only a successful read that finds no verdict counts as a missing review:
           # a check that cannot read the comments warns, so it never triggers a retry.
+          # The verdict is matched by its words, with or without the emoji: reviewers
+          # sometimes write "Verdict: Approved with suggestions".
           if ! counts=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
-              --jq "[.[] | select(.updated_at >= \"$SINCE\") | select(.body | test(\"✅ Approved|Changes requested\"))] | length" 2>&1); then
+              --jq "[.[] | select(.updated_at >= \"$SINCE\") | select(.body | test(\"approved|changes requested\"; \"i\"))] | length" 2>&1); then
             echo "::warning::Could not read the PR's comments to check that the review was posted: $counts"
             exit 0
           fi
