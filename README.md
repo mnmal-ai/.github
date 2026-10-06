@@ -57,19 +57,39 @@ on:
   issues:
     types: [opened]
 
+# The reusable jobs request these permissions; a caller must grant at least
+# the same, or the run fails before any step (startup_failure).
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
 jobs:
   pr-review:
     if: github.event_name == 'pull_request'
     uses: mnmal-ai/.github/.github/workflows/pr-review.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   issue-triage:
     if: github.event_name == 'issues'
     uses: mnmal-ai/.github/.github/workflows/issue-triage.yml@main
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
+
+Both workflows prefer `CLAUDE_CODE_OAUTH_TOKEN` (billed to the Claude subscription) when it is set, and fall back to `ANTHROPIC_API_KEY`. Pass whichever your repo has; passing both is fine.
 
 ### 3. Ask an org admin to add your repo to the secret allowlist
 
